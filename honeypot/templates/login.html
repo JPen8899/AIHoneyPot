@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Honeypot — Sign in</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #121821;
+      --panel-2: #182230;
+      --border: #1f2a3a;
+      --fg: #d8e1ec;
+      --muted: #6f7d90;
+      --accent: #5cf2c7;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--fg);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      height: 100%;
+    }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      background-image:
+        radial-gradient(circle at 20% 20%, rgba(92, 242, 199, 0.05), transparent 40%),
+        radial-gradient(circle at 80% 80%, rgba(255, 107, 107, 0.05), transparent 40%);
+    }
+    .card {
+      width: 360px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 28px 28px 22px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+    }
+    .brand-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+    }
+    h1 {
+      margin: 0; font-size: 14px; color: var(--accent);
+      text-transform: uppercase; letter-spacing: 1.2px;
+    }
+    p.sub {
+      margin: 0 0 22px; color: var(--muted); font-size: 11px;
+    }
+    label {
+      display: block; color: var(--muted);
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
+      margin: 14px 0 4px;
+    }
+    input[type=text], input[type=password] {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      padding: 9px 11px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+    input[type=text]:focus, input[type=password]:focus {
+      border-color: var(--accent);
+    }
+    button {
+      margin-top: 20px;
+      width: 100%;
+      background: var(--accent);
+      color: #03110d;
+      border: none;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    .err {
+      margin-top: 14px; padding: 8px 10px;
+      background: rgba(255, 107, 107, 0.1);
+      border: 1px solid rgba(255, 107, 107, 0.5);
+      border-radius: 4px;
+      color: var(--danger);
+      font-size: 11px;
+    }
+    .footnote {
+      margin-top: 22px; color: var(--muted); font-size: 10px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <form class="card" method="post" action="/login" autocomplete="off">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <h1>AI Honeypot</h1>
+    </div>
+    <p class="sub">Operator console — restricted access.</p>
+
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text" autofocus required />
+
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" required />
+
+    <button type="submit">Sign in</button>
+    {{ERROR}}
+    <div class="footnote">Credentials configured in <code>config.yaml</code></div>
+  </form>
+</body>
+</html>

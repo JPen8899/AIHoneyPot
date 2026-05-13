@@ -1,0 +1,32 @@
+services:
+  honeypot:
+    build: .
+    container_name: ai-honeypot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HONEYPOT_SSH_PORT: "22"
+      HONEYPOT_UI_PORT: "8080"
+      HONEYPOT_LOG_PATH: "/data/logs/sessions.jsonl"
+      HONEYPOT_HOST_KEY: "/data/host_rsa.key"
+      HONEYPOT_CONFIG: "/app/config.yaml"
+      # Override model if desired:
+      # HONEYPOT_MODEL: "claude-sonnet-4-6"
+    ports:
+      # Host:Container — change the host side if you don't want to bind real :22
+      - "2222:22"
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+      # Operator config (dashboard users, geoip toggle).
+      # IMPORTANT: copy config.yaml.example -> config.yaml *before* `docker
+      # compose up`. The long-form bind below tells Docker NOT to silently
+      # create a directory at the host path if the file is missing — it'll
+      # error out instead, which is what you want.
+      - type: bind
+        source: ./config.yaml
+        target: /app/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false

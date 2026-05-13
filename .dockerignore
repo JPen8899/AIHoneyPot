@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+config.yaml
+!config.yaml.example
+.git
+.gitignore
+data/
+logs/
+__pycache__/
+*.pyc
+*.pyo
+.venv
+.vscode
+.idea
+README.md
