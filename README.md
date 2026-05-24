@@ -61,7 +61,8 @@ honeypot/
   sophistication.py  # OSCP-grounded command rubric + per-company env profiles 1-5
   geoip.py           # ip-api.com lookup w/ in-memory cache
   event_bus.py       # thread<->asyncio bridge for live UI updates + geo aggregates
-  logger.py          # JSONL session logger
+  logger.py          # JSONL session logger (+ per-command commands.csv)
+  recorder.py        # per-session transcript (.log) + asciicast (.cast) recorder
   dashboard.py       # FastAPI app: login + WebSocket live feed + map APIs
   templates/
     index.html       # the dashboard UI (Leaflet map + tables + stream)
@@ -319,6 +320,34 @@ Events you'll see: `connect`, `auth`, `session_start`, `command`, `response`,
 decoy website logs `web` events (with `src`, `method`, `path`, `status`, `ua`)
 and a `web_server_start` line.
 
+### Per-session recordings & CSV
+
+Alongside the JSONL, every SSH session is recorded for later review (set
+`HONEYPOT_RECORD=0` to turn this off):
+
+```
+data/logs/
+  sessions.jsonl                  # structured source of truth (one JSON/line)
+  commands.csv                    # one row per command: ts,iso,session_id,tier,score,level,command
+  transcripts/<session_id>.log    # human-readable transcript (full I/O, with tier/score)
+  casts/<session_id>.cast         # asciicast v2 — a replayable terminal recording
+```
+
+- **`commands.csv`** — quick tabular analysis in Excel/pandas; joins back to the
+  JSONL on `session_id`.
+- **`transcripts/*.log`** — the readable "what happened": a header (peer, client,
+  user, company persona) then every command (with its tier/score/level) and the
+  **full** AI response (the JSONL keeps only a 400-char preview).
+- **`casts/*.cast`** — replay an attacker's whole session in your terminal:
+  ```bash
+  asciinema play data/logs/casts/<session_id>.cast      # re-watch in real time
+  asciinema play -s 3 <file>                            # 3x speed
+  ```
+  (Great for the talk — you literally re-run the attacker's session.)
+
+For SQL over the JSONL without any database, point DuckDB at it:
+`SELECT command, tier FROM read_json_auto('data/logs/sessions.jsonl') WHERE event='command';`
+
 ## Security notes
 
 - **Rotate the API key** you put in `.env` once you've finished a test run.
@@ -357,6 +386,7 @@ Environment variables (all optional):
 | `HONEYPOT_SSH_PORT`   | `22`                                  | SSH listener port inside the container        |
 | `HONEYPOT_WEB_PORT`   | `80`                                  | Decoy website port inside the container       |
 | `HONEYPOT_WEB_ENABLED`| `1`                                   | Set `0`/`false` to disable the decoy website  |
+| `HONEYPOT_RECORD`     | `1`                                   | Per-session transcript + asciicast recording; `0`/`false` to disable |
 | `HONEYPOT_UI_PORT`    | `8080`                                | Dashboard port                                |
 | `HONEYPOT_LOG_PATH`   | `/data/logs/sessions.jsonl`           | Where to write the JSONL                      |
 | `HONEYPOT_HOST_KEY`   | `/data/host_rsa.key`                  | SSH host key path (auto-generated)            |

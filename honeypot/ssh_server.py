@@ -27,6 +27,9 @@ class HoneypotSSHServer(paramiko.ServerInterface):
         self.username: str | None = None
         self.password: str | None = None
         self.client_version: str | None = None
+        # Terminal geometry from the PTY request (used for the asciicast header).
+        self.term_width = 80
+        self.term_height = 24
 
     # --- channel / auth policy ---
     def check_channel_request(self, kind: str, chanid: int) -> int:
@@ -71,6 +74,10 @@ class HoneypotSSHServer(paramiko.ServerInterface):
     def check_channel_pty_request(
         self, channel, term, width, height, pixelwidth, pixelheight, modes
     ) -> bool:
+        if width:
+            self.term_width = width
+        if height:
+            self.term_height = height
         return True
 
     def check_channel_shell_request(self, channel) -> bool:

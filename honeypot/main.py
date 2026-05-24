@@ -59,8 +59,11 @@ def main() -> None:
     log_path = os.environ.get("HONEYPOT_LOG_PATH", "/data/logs/sessions.jsonl")
     host_key_path = os.environ.get("HONEYPOT_HOST_KEY", "/data/host_rsa.key")
 
+    # Per-command CSV (for quick tabular analysis) lives beside the JSONL.
+    csv_path = os.path.join(os.path.dirname(log_path) or ".", "commands.csv")
+
     bus = EventBus()
-    logger = SessionLogger(log_path, bus=bus)
+    logger = SessionLogger(log_path, bus=bus, csv_path=csv_path)
     geoip = GeoIPLookup(cfg.geoip)
     host_key = _load_or_create_host_key(host_key_path)
 
