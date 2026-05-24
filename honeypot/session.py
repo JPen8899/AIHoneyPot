@@ -8,30 +8,47 @@ level so the AI environment scales up/down between commands.
 from __future__ import annotations
 
 from .claude_shell import ClaudeShell
+from .company import Company
 from .logger import SessionLogger
 from .sophistication import SophisticationTracker
 
 EXIT_SENTINEL = "__HONEYPOT_EXIT__"
 
-BANNER = (
-    "Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-91-generic x86_64)\r\n"
-    "\r\n"
-    " * Documentation:  https://help.ubuntu.com\r\n"
-    " * Management:     https://landscape.canonical.com\r\n"
-    " * Support:        https://ubuntu.com/advantage\r\n"
-    "\r\n"
-    "###############################################################################\r\n"
-    "# Meridian Global Industries — Corporate Infrastructure                       #\r\n"
-    "# Authorized use only. This system is monitored by CrowdStrike Falcon and    #\r\n"
-    "# all sessions are logged to Splunk (search head: splunk-search.corp.        #\r\n"
-    "# meridianglobal.com). Misuse will be reported to MGI Global Security and    #\r\n"
-    "# may be prosecuted under applicable laws.                                   #\r\n"
-    "#                                                                            #\r\n"
-    "# CMDB: https://cmdb.corp.meridianglobal.com   |   SSO: meridianglobal.okta.com\r\n"
-    "###############################################################################\r\n"
-    "\r\n"
-    "Last login: Mon Apr 28 09:14:22 2026 from 10.10.4.117 (vpn-east.corp.meridianglobal.com)\r\n"
-)
+
+_BANNER_W = 75  # inner content width; box border is _BANNER_W + 4 (= "# " + text + " #")
+
+
+def _banner(c: Company) -> str:
+    """Per-session login banner, themed to the session's company persona."""
+    dom = c.corp_domain
+    border = "#" * (_BANNER_W + 4)
+
+    def row(text: str) -> str:
+        # Truncate defensively so an unusually long company/domain never breaks
+        # the box border.
+        if len(text) > _BANNER_W:
+            text = text[: _BANNER_W - 1] + "…"
+        return f"# {text:<{_BANNER_W}} #\r\n"
+
+    return (
+        "Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-91-generic x86_64)\r\n"
+        "\r\n"
+        " * Documentation:  https://help.ubuntu.com\r\n"
+        " * Management:     https://landscape.canonical.com\r\n"
+        " * Support:        https://ubuntu.com/advantage\r\n"
+        "\r\n"
+        + border + "\r\n"
+        + row(f"{c.name} — Corporate Infrastructure")
+        + row("Authorized use only. Monitored by CrowdStrike Falcon; all sessions")
+        + row("are logged to the corporate Splunk SIEM:")
+        + row(f"  splunk-search.{dom}")
+        + row("Misuse will be reported to Corporate Security and may be prosecuted.")
+        + row("")
+        + row(f"CMDB: cmdb.{dom}   |   SSO: {c.okta_org}")
+        + border + "\r\n"
+        "\r\n"
+        f"Last login: Mon Apr 28 09:14:22 2026 from 10.10.4.117 (vpn-east.{dom})\r\n"
+    )
 
 
 def handle_session(channel, server, session_id: str, logger: SessionLogger) -> None:
@@ -45,6 +62,8 @@ def handle_session(channel, server, session_id: str, logger: SessionLogger) -> N
         username=username,
         peer=f"{server.peer[0]}:{server.peer[1]}",
         client_version=server.client_version,
+        company=shell.company.name,
+        company_slug=shell.company.slug,
     )
 
     # Non-interactive `ssh user@host <cmd>` path.
@@ -54,7 +73,7 @@ def handle_session(channel, server, session_id: str, logger: SessionLogger) -> N
         _process_command(channel, shell, tracker, logger, session_id, cmd, interactive=False)
         return
 
-    channel.send(BANNER.encode())
+    channel.send(_banner(shell.company).encode())
     channel.send(shell.prompt_string().encode())
 
     buf = bytearray()

@@ -10,6 +10,7 @@ import paramiko
 
 from .config import load as load_config
 from .dashboard import run_dashboard
+from .decoy_web import serve_decoy_web
 from .event_bus import EventBus
 from .geoip import GeoIPLookup
 from .logger import SessionLogger
@@ -52,6 +53,9 @@ def main() -> None:
     ssh_port = int(os.environ.get("HONEYPOT_SSH_PORT", "22"))
     ui_host = os.environ.get("HONEYPOT_UI_HOST", "0.0.0.0")
     ui_port = int(os.environ.get("HONEYPOT_UI_PORT", "8080"))
+    web_host = os.environ.get("HONEYPOT_WEB_HOST", "0.0.0.0")
+    web_port = int(os.environ.get("HONEYPOT_WEB_PORT", "80"))
+    web_enabled = os.environ.get("HONEYPOT_WEB_ENABLED", "1").lower() not in ("0", "false", "no")
     log_path = os.environ.get("HONEYPOT_LOG_PATH", "/data/logs/sessions.jsonl")
     host_key_path = os.environ.get("HONEYPOT_HOST_KEY", "/data/host_rsa.key")
 
@@ -75,6 +79,17 @@ def main() -> None:
 
     t = threading.Thread(target=_ssh_thread, daemon=True, name="ssh-server")
     t.start()
+
+    # Public-facing decoy website (bait that funnels scanners toward SSH).
+    # Shares the JSONL logger so web recon shows up alongside SSH events.
+    if web_enabled:
+        web_thread = threading.Thread(
+            target=serve_decoy_web,
+            args=(web_host, web_port, logger),
+            daemon=True,
+            name="decoy-web",
+        )
+        web_thread.start()
 
     # Dashboard runs in the main thread (uvicorn manages its own loop).
     run_dashboard(bus, cfg, host=ui_host, port=ui_port)

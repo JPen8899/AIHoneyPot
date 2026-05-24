@@ -7,11 +7,33 @@ The simulated environment **scales up or down** based on the attacker's
 sophistication — the more dangerous the recon/escalation patterns, the more
 tempting the box appears.
 
-The simulated estate is themed as **Meridian Global Industries (MGI)** — a
-fictional Fortune-100 conglomerate — so escalating attackers see clear
-breadcrumbs (Okta SSO, Splunk SIEM, CrowdStrike Falcon, AWS Organization
-with 450+ accounts, multiple named subsidiaries) that mark the box as part
-of a large, high-value enterprise worth deeper exploration.
+Each SSH session adopts a **randomly chosen real Fortune-100 company** persona
+(Walmart, Amazon, Microsoft, UnitedHealth, JPMorgan Chase, …; see
+`company.py`), so escalating attackers see clear breadcrumbs — the company's
+real business units/brands, Okta SSO, Splunk SIEM, CrowdStrike Falcon, an AWS
+Organization with hundreds of accounts, a corp Active Directory forest — that
+mark the box as part of a large, high-value enterprise worth deeper
+exploration. The persona is rerolled per session; restart and a different
+company turns up.
+
+> ⚠️ **Real names are deception props.** Every host, IP, credential and secret
+> the honeypot derives from a company is **fabricated** — none of it is real or
+> belongs to the company. The two surfaces default differently *by exposure*:
+> the **SSH shell** uses real companies (revealed only after an intruder
+> connects + authenticates — not public, not indexable), while the **public
+> decoy website defaults to the fictional "Meridian Global Industries"**
+> persona, since a public page impersonating a real brand is the part that
+> could be indexed or flagged as phishing. Override per surface with
+> `HONEYPOT_COMPANY_SSH` / `HONEYPOT_COMPANY_WEB` (or `HONEYPOT_COMPANY` for
+> both); each accepts `random`, `fictional`, or a slug like `microsoft`. See
+> [Company personas](#company-personas--legal-note).
+
+In front of it sits a **decoy "vulnerable" website** on port 80 — bait whose
+only job is to make a scanner conclude the box is a soft, neglected target and
+that **SSH on :22 is the way in**. It advertises an end-of-life Apache/PHP
+stack, leaks an `.env` / `.git` / `/backup/` directory, and spills temporary
+SSH deploy credentials in a "debug mode" stack trace. Every lead points at the
+SSH listener, which accepts any credentials → straight into the AI shell.
 
 A real-time web dashboard shows every active session, every command as it's
 typed, a per-session sophistication score, and a **world-map view** of
@@ -28,13 +50,15 @@ credentials declared in `config.yaml`.
 
 ```
 honeypot/
-  main.py            # entrypoint — boots SSH server + dashboard
+  main.py            # entrypoint — boots SSH server + decoy web + dashboard
   config.py          # YAML config loader (users, geoip, secret key)
   auth.py            # operator login / session cookie helpers
+  decoy_web.py       # public "vulnerable" bait site that funnels to SSH (port 80)
+  company.py         # real Fortune-100 personas + random picker (HONEYPOT_COMPANY)
   ssh_server.py      # paramiko SSH server, accepts any login
-  session.py         # per-connection shell loop
+  session.py         # per-connection shell loop (per-session company persona)
   claude_shell.py    # Anthropic API wrapper that emulates a Linux shell
-  sophistication.py  # scores commands, picks env level 1-5 (Fortune 500 profiles)
+  sophistication.py  # OSCP-grounded command rubric + per-company env profiles 1-5
   geoip.py           # ip-api.com lookup w/ in-memory cache
   event_bus.py       # thread<->asyncio bridge for live UI updates + geo aggregates
   logger.py          # JSONL session logger
@@ -46,29 +70,103 @@ honeypot/
 
 ## Sophistication tiers → env level
 
-| Tier | Examples                                           | Weight |
-|------|----------------------------------------------------|--------|
-| 1    | `ls`, `pwd`, `whoami`, `id`, `uname`               | +1     |
-| 2    | `ps`, `netstat`, `find`, `cat /etc/passwd`         | +2     |
-| 3    | `sudo -l`, `/etc/shadow`, suid finds, ssh keys     | +4     |
-| 4    | `crontab`, `ssh-keygen`, `nc -lvp`, `/dev/tcp/`    | +6     |
-| 5    | `history -c`, log truncation, `shred`, `insmod`    | +8     |
+The command rubric (`sophistication.py`) is grounded in the operator's own
+OSCP / red-team notes, so it recognizes the actual tradecraft you'd expect to
+see — not just shell builtins. Patterns are matched case-insensitively, and
+when a command matches multiple tiers it scores as the **most dangerous** one.
+
+| Tier | Examples (matched case-insensitively)                                                       | Weight |
+|------|---------------------------------------------------------------------------------------------|--------|
+| 1    | `ls`, `pwd`, `whoami`, `id`, `uname`, `hostname`, `systeminfo`                               | +1     |
+| 2    | `nmap`, `enum4linux`, `smbclient`, `gobuster`/`feroxbuster`/`ffuf`, `ldapsearch`, `kerbrute`, `net user`, `/etc/passwd` | +2 |
+| 3    | `sudo -l`, suid finds, **winPEAS**/**linPEAS**, **PowerUp**, **Seatbelt**, `pspy`, **BloodHound**/**SharpHound**, PowerView, GPP/cpassword, `pkexec`/dirtypipe, `.aws/credentials` | +4 |
+| 4    | **Impacket** (`psexec.py`/`wmiexec.py`/`secretsdump.py`), `evil-winrm`, `crackmapexec`/`nxc`/`netexec`, `responder`, `ntlmrelayx`, **mimikatz**, **Rubeus**, kerberoast/asreproast, `chisel`/`ligolo`/`proxychains`, `msfvenom`/`meterpreter`, `schtasks /create`, `nc -lvp` | +6 |
+| 5    | DCSync (`secretsdump … -just-dc`, `lsadump::dcsync`), golden ticket, `ntds.dit`/`ntdsutil`, `wevtutil cl`/`Clear-EventLog`, `vssadmin delete`, `history -c`, `shred`, timestomp | +8 |
 
 Cumulative score → level: `<3` L1, `<8` L2, `<18` L3, `<35` L4, `>=35` L5.
 
-Each level swaps a richer Fortune-500 profile into Claude's system prompt:
+Each level swaps a richer profile into Claude's system prompt, built for the
+session's chosen company (`<slug>` below = its hostname token, e.g. `walmart`,
+`amazon`, `jpmc`):
 
-| Lvl | Hostname                                | What the attacker sees                                                              |
-|-----|-----------------------------------------|-------------------------------------------------------------------------------------|
-| 1   | `mgi-web-edge-01`                       | Public DMZ web node, MOTD names MGI, CrowdStrike Falcon sensor                      |
-| 2   | `mgi-app-prod-12`                       | Prod Node.js app, Splunk forwarder, Okta env vars, CMDB tags (subsidiary names)     |
-| 3   | `mgi-ci-build-04`                       | Jenkins CI w/ AWS Org build profile, GHE token, multiple subsidiary repos, krb5 → AD|
-| 4   | `mgi-bastion-east-02`                   | Jump host into 10.0.0.0/8, known_hosts on AD DCs + Splunk indexers, 12.4k-host CMDB |
-| 5   | `mgi-vault-broker-east-01`              | Vault unseal quorum, AWS Org root creds, Azure tenant root SP, Okta super admin     |
+| Lvl | Hostname                       | What the attacker sees                                                              |
+|-----|--------------------------------|-------------------------------------------------------------------------------------|
+| 1   | `<slug>-web-edge-01`           | Public DMZ web node, MOTD names the company, CrowdStrike Falcon sensor              |
+| 2   | `<slug>-app-prod-12`           | Prod Node.js app, Splunk forwarder, Okta env vars, CMDB tags (business-unit names)  |
+| 3   | `<slug>-ci-build-04`           | Jenkins CI w/ AWS Org build profile, GHE token, subsidiary repos, krb5 → AD         |
+| 4   | `<slug>-bastion-east-02`       | Jump host into 10.0.0.0/8, known_hosts on AD DCs + Splunk indexers, 12.4k-host CMDB |
+| 5   | `<slug>-vault-broker-east-01`  | Vault unseal quorum, AWS Org root creds, Azure tenant root SP, Okta super admin     |
+
+The chosen persona is recorded on the `session_start` log event (`company`,
+`company_slug`) so you can see which company each attacker was shown.
 
 A bored, unsophisticated bot sees an empty marketing edge node; an active
 attacker escalates into a "crown jewel" Vault broker — keeping them engaged
 longer for telemetry while the dashboard score and map light up.
+
+## Decoy "vulnerable" website (port 80)
+
+`decoy_web.py` serves a deliberately broken, leaky, end-of-life-looking web app
+on **port 80** — themed as a company's public edge node
+(`<slug>-web-edge-01.corp.<domain>`). It picks **one** persona at startup (a
+website can't change identity per page load) and, because it's the public
+surface, **defaults to the fictional "Meridian Global Industries"** persona
+(override with `HONEYPOT_COMPANY_WEB`; see [Company personas](#company-personas--legal-note)).
+The site is pure static content from the Python stdlib HTTP server (no extra
+dependencies); nothing it serves executes anything.
+
+The point is to look like a soft target whose real foothold is SSH:
+
+- **EoL/vulnerable stack banners** — `Server: Apache/2.4.49` (CVE-2021-41773)
+  and `X-Powered-By: PHP/7.4.3` (end-of-life) on every response.
+- **Leaky recon surface** — `/robots.txt` lists the goodies; `/.env`,
+  `/.git/config`, `/server-status`, `/phpinfo.php`, and an Apache-style
+  `/backup/` directory index are all readable.
+- **Broken features** — the staff login (`POST /login`) returns a "debug mode"
+  500 stack trace; nav links 503 ("mid-migration"); the genuinely juicy
+  `/backup/` artifacts (DB dump, `id_rsa_deploy.bak`) 403 — a broken permission
+  that nudges the attacker toward SSH instead.
+- **The funnel** — the login traceback, `/.env`, `/backup/deploy_notes.txt`,
+  and `/phpinfo.php` all leak the same temporary SSH deploy credential
+  (`ssh <slug>-deploy@… port 22`). Because the SSH listener accepts ANY
+  credentials, following any of these leads drops the attacker into the AI
+  shell, where the session is logged and scored.
+
+Every web request is written to the same JSONL log as a `web` event (with the
+source IP, method, path, status, and user-agent) and shows up in the dashboard's
+live event stream — without creating phantom rows in the SSH session table.
+
+Disable it with `HONEYPOT_WEB_ENABLED=0`, or move it off :80 with
+`HONEYPOT_WEB_PORT`.
+
+## Company personas / legal note
+
+`company.py` holds 20 real Fortune-100 personas plus a fictional fallback
+("Meridian Global Industries"). A persona drives hostnames, the login banner,
+the system prompt, and the decoy site's branding. **Everything derived from a
+company is fabricated** — no real hosts, IPs, credentials, or data.
+
+The two surfaces carry different exposure, so they default differently:
+
+| Surface         | Default    | Why                                                                                   |
+|-----------------|------------|---------------------------------------------------------------------------------------|
+| SSH shell (:22) | `random`   | Persona is revealed only *after* an intruder connects to an "authorized use only" service and authenticates — not public, not indexable. Low public-impersonation profile. |
+| Decoy web (:80) | `fictional`| Unauthenticated and public — broadcasts the brand to crawlers/scanners and could be indexed or flagged as phishing impersonating the company. Highest risk. |
+
+Resolution (per-scope var → global var → per-scope default):
+
+```
+HONEYPOT_COMPANY_SSH=<v>   # SSH shell only
+HONEYPOT_COMPANY_WEB=<v>   # decoy website only
+HONEYPOT_COMPANY=<v>       # both (unless a scope var overrides)
+# <v> = random | fictional | <slug>  (e.g. microsoft, walmart, jpmc)
+```
+
+Examples: `HONEYPOT_COMPANY=fictional` (everything fake, safest for public
+deployment); `HONEYPOT_COMPANY=random` (real on both, incl. the web — only if
+you've accepted that exposure); `HONEYPOT_COMPANY_SSH=microsoft` (pin the shell
+for a repeatable demo). This is **not legal advice** — for a public deployment,
+or any reuse of a real brand, confirm the implications for your jurisdiction.
 
 ## Operator authentication
 
@@ -155,39 +253,53 @@ timeout is also configurable.
 
 This binds:
 
-- **host :2222 → container :22**  (SSH honeypot — open auth)
-- **host :8080 → container :8080** (dashboard — login required)
+- **host :22 → container :22**     (SSH honeypot — open auth, the real foothold)
+- **host :80 → container :80**     (decoy "vulnerable" website — bait)
+- **host :8080 → container :8080** (operator dashboard — login required)
 
-If you want the honeypot on real port 22, edit `docker-compose.yml`:
-
-```yaml
-ports:
-  - "22:22"     # ← needs root / no other sshd on host
-  - "8080:8080"
-```
+> **Ports 22 and 80 are privileged.** Binding them needs root on the host, and
+> the host must not already be running a real `sshd` on 22 or a web server on
+> 80. If port 22 is taken (e.g. by the host's own SSH), either move the host's
+> sshd to another port or remap the honeypot to a high port in
+> `docker-compose.yml` (e.g. `"2222:22"`) — at the cost of looking less like a
+> normal box. Keep the dashboard (`8080`) off the public internet: bind it to
+> loopback with `"127.0.0.1:8080:8080"` or put it behind a VPN/reverse proxy.
 
 ## Try it
 
 ```bash
 # In one terminal
 docker compose up --build
+```
 
-# In another — connect to the honeypot with literally any creds
-ssh -p 2222 anyone@localhost
-# password: literally anything
+First, play the attacker poking the **decoy website** and following its trail
+to SSH:
 
-# Then poke around:
-whoami
-ls
-cat /etc/motd
-cat /etc/passwd
+```bash
+curl -s http://localhost/                        # EoL Apache/PHP banners; names the company
+curl -s http://localhost/robots.txt              # points at the goodies
+curl -s http://localhost/.env                    # leaked deploy creds + ssh hint
+curl -s http://localhost/backup/                 # autoindex of a leaky dir
+curl -s http://localhost/backup/deploy_notes.txt # "ssh <company>-deploy@… port 22"
+curl -s -X POST http://localhost/login           # debug 500 leaks the same creds
+```
+
+Then follow the breadcrumb in — the SSH listener takes **any** username and
+**any** password, so you don't even need the leaked one:
+
+```bash
+ssh anyone@localhost          # port 22; username + password: literally anything
+# Then poke around — try escalating to watch the box scale up:
+whoami; ls; cat /etc/motd; cat /etc/passwd
 sudo -l
 find / -perm -4000 2>/dev/null
+./linpeas.sh                  # winPEAS/linPEAS, BloodHound, impacket, mimikatz…
+GetUserSPNs.py corp/u:p -request   # …all push the sophistication score up
 ```
 
 Open `http://localhost:8080`, sign in with the credentials you put in
-`config.yaml`, and watch the map light up plus your own session climb the
-sophistication ladder in real time.
+`config.yaml`, and watch the web hits and your SSH session stream in — the map
+lighting up and the session climbing the sophistication ladder in real time.
 
 ## Logs
 
@@ -203,7 +315,9 @@ a volume). One JSON object per line:
 ```
 
 Events you'll see: `connect`, `auth`, `session_start`, `command`, `response`,
-`logout`, `disconnect`, plus `server_start` and various error variants.
+`logout`, `disconnect`, plus `server_start` and various error variants. The
+decoy website logs `web` events (with `src`, `method`, `path`, `status`, `ua`)
+and a `web_server_start` line.
 
 ## Security notes
 
@@ -211,6 +325,15 @@ Events you'll see: `connect`, `auth`, `session_start`, `command`, `response`,
 - The SSH listener is open by design — **don't bind it on the open internet
   unless you understand the exposure**. Treat the host the honeypot runs on
   as an attacker-facing tier.
+- The decoy website (port 80) is meant to face the internet and serves only
+  static strings — nothing it shows executes, and the leaked "credentials" are
+  fake (the SSH side accepts anything regardless).
+- **Real company names are deception props, not endorsements or real data.**
+  Every hostname, IP, credential, and secret tied to a company is fabricated.
+  The high-exposure surface is the **public decoy web**, which defaults to the
+  fictional persona; the post-auth SSH shell defaults to real companies. For a
+  fully neutral public deployment set `HONEYPOT_COMPANY=fictional`; see
+  [Company personas](#company-personas--legal-note) for the per-surface knobs.
 - The dashboard now requires login; if `auth_enabled: false`, bind it to
   localhost or behind a reverse proxy.
 - `paramiko` host key is auto-generated on first boot into `./data/host_rsa.key`.
@@ -228,7 +351,12 @@ Environment variables (all optional):
 |-----------------------|---------------------------------------|-----------------------------------------------|
 | `ANTHROPIC_API_KEY`   | (required)                            | Claude API key                                |
 | `HONEYPOT_MODEL`      | `claude-haiku-4-5-20251001`           | Switch to `claude-sonnet-4-6` for richer sims |
-| `HONEYPOT_SSH_PORT`   | `22`                                  | Port inside the container                     |
+| `HONEYPOT_COMPANY`    | (per-scope)                           | Persona for both surfaces: `random`, `fictional`, or a slug (e.g. `microsoft`). Overridden per surface by the two below. |
+| `HONEYPOT_COMPANY_SSH`| `random`                              | SSH-shell persona only (post-auth; defaults to a random real Fortune-100) |
+| `HONEYPOT_COMPANY_WEB`| `fictional`                           | Decoy-website persona only (public; defaults to fictional)    |
+| `HONEYPOT_SSH_PORT`   | `22`                                  | SSH listener port inside the container        |
+| `HONEYPOT_WEB_PORT`   | `80`                                  | Decoy website port inside the container       |
+| `HONEYPOT_WEB_ENABLED`| `1`                                   | Set `0`/`false` to disable the decoy website  |
 | `HONEYPOT_UI_PORT`    | `8080`                                | Dashboard port                                |
 | `HONEYPOT_LOG_PATH`   | `/data/logs/sessions.jsonl`           | Where to write the JSONL                      |
 | `HONEYPOT_HOST_KEY`   | `/data/host_rsa.key`                  | SSH host key path (auto-generated)            |
