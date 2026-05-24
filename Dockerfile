@@ -23,9 +23,8 @@ COPY config.yaml.example ./config.yaml.example
 RUN mkdir -p /data/logs
 VOLUME ["/data"]
 
-# 22   = SSH honeypot (the real foothold)
-# 80   = decoy "vulnerable" website (bait that funnels to SSH)
-# 8080 = operator dashboard
-EXPOSE 22 80 8080
+# 22 = SSH honeypot (the real foothold)
+# 80 = decoy "vulnerable" website (bait that funnels to SSH)
+EXPOSE 22 80
 
 CMD ["python", "-m", "honeypot.main"]

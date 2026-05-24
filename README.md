@@ -35,38 +35,30 @@ stack, leaks an `.env` / `.git` / `/backup/` directory, and spills temporary
 SSH deploy credentials in a "debug mode" stack trace. Every lead points at the
 SSH listener, which accepts any credentials → straight into the AI shell.
 
-A real-time web dashboard shows every active session, every command as it's
-typed, a per-session sophistication score, and a **world-map view** of
-where the inbound SSH attempts are geographically originating from. The
-dashboard is gated behind an **operator login** (mythic-c2 style) with
-credentials declared in `config.yaml`.
+All activity is written to **log files** for later review — there is no live
+dashboard. Every SSH session and decoy-web hit lands in a structured JSONL log,
+plus a per-command CSV and, per session, a human-readable transcript and a
+replayable [asciicast](https://asciinema.org/) recording (see [Logs](#logs)).
 
-> ⚠️ **SSH-side auth is still open by design**: the honeypot accepts ANY
-> username and ANY password (and any pubkey) on the SSH listener so it can
-> funnel attackers into the AI shell. The login screen described below is
-> for the **operator dashboard only**.
+> ⚠️ **SSH-side auth is open by design**: the honeypot accepts ANY username and
+> ANY password (and any pubkey) on the SSH listener so it can funnel attackers
+> into the AI shell.
 
 ## Components
 
 ```
 honeypot/
-  main.py            # entrypoint — boots SSH server + decoy web + dashboard
-  config.py          # YAML config loader (users, geoip, secret key)
-  auth.py            # operator login / session cookie helpers
+  main.py            # entrypoint — boots the SSH honeypot + decoy web
+  config.py          # optional YAML config loader (geoip toggle)
   decoy_web.py       # public "vulnerable" bait site that funnels to SSH (port 80)
   company.py         # real Fortune-100 personas + random picker (HONEYPOT_COMPANY)
   ssh_server.py      # paramiko SSH server, accepts any login
   session.py         # per-connection shell loop (per-session company persona)
   claude_shell.py    # Anthropic API wrapper that emulates a Linux shell
   sophistication.py  # OSCP-grounded command rubric + per-company env profiles 1-5
-  geoip.py           # ip-api.com lookup w/ in-memory cache
-  event_bus.py       # thread<->asyncio bridge for live UI updates + geo aggregates
+  geoip.py           # ip-api.com lookup w/ in-memory cache (enriches the logs)
   logger.py          # JSONL session logger (+ per-command commands.csv)
   recorder.py        # per-session transcript (.log) + asciicast (.cast) recorder
-  dashboard.py       # FastAPI app: login + WebSocket live feed + map APIs
-  templates/
-    index.html       # the dashboard UI (Leaflet map + tables + stream)
-    login.html       # operator login page
 ```
 
 ## Sophistication tiers → env level
@@ -103,7 +95,8 @@ The chosen persona is recorded on the `session_start` log event (`company`,
 
 A bored, unsophisticated bot sees an empty marketing edge node; an active
 attacker escalates into a "crown jewel" Vault broker — keeping them engaged
-longer for telemetry while the dashboard score and map light up.
+longer, with every command and its rising sophistication score captured in the
+logs.
 
 ## Decoy "vulnerable" website (port 80)
 
@@ -134,8 +127,8 @@ The point is to look like a soft target whose real foothold is SSH:
   shell, where the session is logged and scored.
 
 Every web request is written to the same JSONL log as a `web` event (with the
-source IP, method, path, status, and user-agent) and shows up in the dashboard's
-live event stream — without creating phantom rows in the SSH session table.
+source IP, method, path, status, and user-agent), so web recon shows up
+alongside the SSH activity.
 
 Disable it with `HONEYPOT_WEB_ENABLED=0`, or move it off :80 with
 `HONEYPOT_WEB_PORT`.
@@ -169,61 +162,19 @@ you've accepted that exposure); `HONEYPOT_COMPANY_SSH=microsoft` (pin the shell
 for a repeatable demo). This is **not legal advice** — for a public deployment,
 or any reuse of a real brand, confirm the implications for your jurisdiction.
 
-## Operator authentication
-
-The dashboard is protected by **username + password login**, declared in
-`config.yaml` (mythic-c2 style):
-
-```yaml
-dashboard:
-  secret_key: null   # set a long random string for stable sessions
-  session_max_age: 43200
-  auth_enabled: true
-  users:
-    - username: admin
-      password: changeme
-    - username: analyst
-      password: another-strong-passphrase
-```
-
-`config.yaml` is **gitignored** and **dockerignored**. After cloning:
-
-```bash
-cp config.yaml.example config.yaml
-chmod 600 config.yaml
-$EDITOR config.yaml          # set users + a real secret_key
-```
-
-`secret_key` signs the session cookie. If left null, a random key is
-generated at startup — login sessions won't survive a restart, but auth
-still works.
-
-Login page is at `http://localhost:8080/login`; the dashboard at `/` will
-redirect there until you sign in. `/logout` clears the session.
-
-WebSocket connections are also auth-gated: the browser's session cookie is
-required on the WS handshake (rejected as close code `4401` otherwise),
-and an expired session bounces the page back to `/login`.
-
-## Geolocation & map view
+## Geolocation
 
 Every inbound SSH connection's source IP is run through `ip-api.com`'s free
 endpoint (no key required) with in-memory caching. Private / loopback /
 link-local addresses are short-circuited and never sent to the third party.
-Results are attached to the `connect`/`disconnect` events in the JSONL log
-under a `geo` field, and the dashboard aggregates them into:
+The result is attached to the `connect`/`disconnect` events in the JSONL log
+under a `geo` field (country, city, lat/lon, ISP, ASN), so you can map or
+aggregate origins offline from the logs.
 
-- **Leaflet world map** with one marker per unique source IP; marker size
-  scales with hit count, color escalates from teal → red as that IP racks
-  up repeat hits.
-- **Top countries / top cities / top IPs** ranked lists.
-- A `Countries` stat in the header.
-- A per-session **Origin** column in the active-session table (country code
-  + city or "private").
-
-Disable the lookup (e.g. no outbound, or you don't want a third-party
-service seeing the IPs) via `geoip.enabled: false` in `config.yaml`. Lookup
-timeout is also configurable.
+Disable the lookup (e.g. no outbound, or you don't want a third-party service
+seeing the IPs) via `geoip.enabled: false` in `config.yaml`; the timeout and
+endpoint are configurable there too. Config is optional — drop a `config.yaml`
+in `./data` to tune it, otherwise the defaults above apply.
 
 ## Setup
 
@@ -238,33 +189,26 @@ timeout is also configurable.
    > a prompt exposes it to every layer that processed the message — revoke
    > it at <https://console.anthropic.com> and use a fresh one.
 
-2. Create the operator config:
-
-   ```bash
-   cp config.yaml.example config.yaml
-   chmod 600 config.yaml
-   $EDITOR config.yaml
-   ```
-
-3. Build and run:
+2. Build and run:
 
    ```bash
    docker compose up --build
    ```
 
+   (Config is optional — there's nothing to set up before first run. To tune
+   geoip, drop a `config.yaml` in `./data`; see `config.yaml.example`.)
+
 This binds:
 
-- **host :22 → container :22**     (SSH honeypot — open auth, the real foothold)
-- **host :80 → container :80**     (decoy "vulnerable" website — bait)
-- **host :8080 → container :8080** (operator dashboard — login required)
+- **host :22 → container :22**  (SSH honeypot — open auth, the real foothold)
+- **host :80 → container :80**  (decoy "vulnerable" website — bait)
 
 > **Ports 22 and 80 are privileged.** Binding them needs root on the host, and
 > the host must not already be running a real `sshd` on 22 or a web server on
 > 80. If port 22 is taken (e.g. by the host's own SSH), either move the host's
 > sshd to another port or remap the honeypot to a high port in
 > `docker-compose.yml` (e.g. `"2222:22"`) — at the cost of looking less like a
-> normal box. Keep the dashboard (`8080`) off the public internet: bind it to
-> loopback with `"127.0.0.1:8080:8080"` or put it behind a VPN/reverse proxy.
+> normal box.
 
 ## Try it
 
@@ -298,9 +242,13 @@ find / -perm -4000 2>/dev/null
 GetUserSPNs.py corp/u:p -request   # …all push the sophistication score up
 ```
 
-Open `http://localhost:8080`, sign in with the credentials you put in
-`config.yaml`, and watch the web hits and your SSH session stream in — the map
-lighting up and the session climbing the sophistication ladder in real time.
+Then review what happened in the logs — the JSONL stream, the per-command CSV,
+and the per-session transcript / replayable asciicast (see [Logs](#logs)):
+
+```bash
+tail -f data/logs/sessions.jsonl
+asciinema play data/logs/casts/<session_id>.cast    # re-watch the session
+```
 
 ## Logs
 
@@ -363,11 +311,12 @@ For SQL over the JSONL without any database, point DuckDB at it:
   fictional persona; the post-auth SSH shell defaults to real companies. For a
   fully neutral public deployment set `HONEYPOT_COMPANY=fictional`; see
   [Company personas](#company-personas--legal-note) for the per-surface knobs.
-- The dashboard now requires login; if `auth_enabled: false`, bind it to
-  localhost or behind a reverse proxy.
+- There is no dashboard/admin interface to expose — review activity from the
+  log files under `./data/logs`. Treat that directory as sensitive (it captures
+  attacker input) and ship a copy off the attacker-facing box.
 - `paramiko` host key is auto-generated on first boot into `./data/host_rsa.key`.
   Persist it across rebuilds so SSH clients don't see "host key changed".
-- `.env` and `config.yaml` are `chmod 600` and gitignored / dockerignored.
+- `.env` is `chmod 600` and gitignored / dockerignored.
 - Geoip lookups go to `ip-api.com` over plaintext HTTP by default. If that
   bothers you, set `geoip.enabled: false`, or change `geoip.endpoint` to a
   local GeoIP service.
@@ -387,8 +336,6 @@ Environment variables (all optional):
 | `HONEYPOT_WEB_PORT`   | `80`                                  | Decoy website port inside the container       |
 | `HONEYPOT_WEB_ENABLED`| `1`                                   | Set `0`/`false` to disable the decoy website  |
 | `HONEYPOT_RECORD`     | `1`                                   | Per-session transcript + asciicast recording; `0`/`false` to disable |
-| `HONEYPOT_UI_PORT`    | `8080`                                | Dashboard port                                |
-| `HONEYPOT_LOG_PATH`   | `/data/logs/sessions.jsonl`           | Where to write the JSONL                      |
+| `HONEYPOT_LOG_PATH`   | `/data/logs/sessions.jsonl`           | Where to write the JSONL (CSV + recordings land beside it) |
 | `HONEYPOT_HOST_KEY`   | `/data/host_rsa.key`                  | SSH host key path (auto-generated)            |
-| `HONEYPOT_CONFIG`     | `./config.yaml`                       | Operator config path                          |
-| `HONEYPOT_SECRET_KEY` | (random per restart)                  | Fallback session-cookie key if not in YAML    |
+| `HONEYPOT_CONFIG`     | (auto-discovered)                     | Optional geoip config path (else `./data/config.yaml` / defaults) |

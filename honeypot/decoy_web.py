@@ -1,8 +1,8 @@
 """Decoy "vulnerable" web front-end whose only job is to funnel attackers to SSH.
 
-This is *bait*, not the operator dashboard (that lives in `dashboard.py` on its
-own port). It serves a deliberately broken, leaky, end-of-life-looking web app
-themed as a real Fortune-100 company's public edge node — picked once per
+This is the public-facing *bait*: a deliberately broken, leaky,
+end-of-life-looking web app themed as a real Fortune-100 company's public edge
+node — picked once per
 process from `company.py`, the same persona pool the SSH/Claude shell draws
 from — so the breadcrumbs an attacker finds here line up with the kind of box
 they land on after they `ssh` in. (Because each SSH session rerolls its own
@@ -497,7 +497,7 @@ def serve_decoy_web(host: str, port: int, logger: SessionLogger) -> None:
     Intended to run in its own daemon thread. The company persona is chosen once
     per process (a website can't change identity per page load). A bind failure
     (e.g. port 80 without privileges, or already in use) is logged and swallowed
-    so the SSH honeypot and dashboard keep running.
+    so the SSH honeypot keeps running.
     """
     # The public web scope defaults to the fictional persona (lowest exposure);
     # override with HONEYPOT_COMPANY[_WEB]. See company.py.

@@ -1,26 +1,16 @@
-"""Load operator config (dashboard users, geoip toggle, etc.) from YAML."""
+"""Load honeypot config (currently just the geoip toggle) from YAML.
+
+Config is optional: if no `config.yaml` is found (next to the package, at
+`/data/config.yaml`, `/app/config.yaml`, or `$HONEYPOT_CONFIG`), sensible
+defaults are used.
+"""
 from __future__ import annotations
 
 import os
-import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-
-
-@dataclass
-class DashboardUser:
-    username: str
-    password: str  # plaintext; restrict file perms instead
-
-
-@dataclass
-class DashboardConfig:
-    secret_key: str
-    session_max_age: int = 43200
-    users: list[DashboardUser] = field(default_factory=list)
-    auth_enabled: bool = True
 
 
 @dataclass
@@ -35,7 +25,6 @@ class GeoIPConfig:
 
 @dataclass
 class AppConfig:
-    dashboard: DashboardConfig
     geoip: GeoIPConfig
     source_path: str | None = None
 
@@ -65,28 +54,6 @@ def load(path: str | None = None) -> AppConfig:
         with src.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
 
-    dash_raw = (data.get("dashboard") or {})
-    users_raw = dash_raw.get("users") or []
-    users: list[DashboardUser] = []
-    for u in users_raw:
-        if not isinstance(u, dict):
-            continue
-        un = str(u.get("username") or "").strip()
-        pw = str(u.get("password") or "")
-        if un and pw:
-            users.append(DashboardUser(username=un, password=pw))
-
-    secret_key = dash_raw.get("secret_key")
-    if not secret_key:
-        secret_key = os.environ.get("HONEYPOT_SECRET_KEY") or secrets.token_urlsafe(48)
-
-    dashboard = DashboardConfig(
-        secret_key=str(secret_key),
-        session_max_age=int(dash_raw.get("session_max_age") or 43200),
-        users=users,
-        auth_enabled=bool(dash_raw.get("auth_enabled", True)),
-    )
-
     geo_raw = (data.get("geoip") or {})
     geoip = GeoIPConfig(
         enabled=bool(geo_raw.get("enabled", True)),
@@ -95,7 +62,6 @@ def load(path: str | None = None) -> AppConfig:
     )
 
     return AppConfig(
-        dashboard=dashboard,
         geoip=geoip,
         source_path=str(src) if src else None,
     )

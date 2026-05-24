@@ -8,10 +8,8 @@ services:
     environment:
       HONEYPOT_SSH_PORT: "22"
       HONEYPOT_WEB_PORT: "80"
-      HONEYPOT_UI_PORT: "8080"
       HONEYPOT_LOG_PATH: "/data/logs/sessions.jsonl"
       HONEYPOT_HOST_KEY: "/data/host_rsa.key"
-      HONEYPOT_CONFIG: "/app/config.yaml"
       # Override model if desired:
       # HONEYPOT_MODEL: "claude-sonnet-4-6"
       # Company persona shown to attackers. Defaults differ by exposure:
@@ -21,25 +19,15 @@ services:
       # HONEYPOT_COMPANY: "fictional"        # both surfaces fully fictional (safest public)
       # HONEYPOT_COMPANY_SSH: "microsoft"    # pin the shell (e.g. repeatable demo)
       # HONEYPOT_COMPANY_WEB: "random"       # opt the public web into real names
+      # HONEYPOT_RECORD: "0"                 # disable per-session transcripts + asciicasts
     ports:
-      # Host:Container. SSH and the decoy web bind the real :22 / :80 so the
-      # box looks like an ordinary, slightly-neglected internet host. Binding
-      # <1024 needs root on the host and no existing sshd/webserver there.
+      # Host:Container. SSH and the decoy web bind the real :22 / :80 so the box
+      # looks like an ordinary, slightly-neglected internet host. Binding <1024
+      # needs root on the host and no existing sshd/webserver there.
       - "22:22"      # SSH honeypot — the real foothold (open auth)
       - "80:80"      # decoy "vulnerable" website — bait that points at SSH
-      # Operator dashboard. Keep this OFF the public internet (bind to
-      # loopback — "127.0.0.1:8080:8080" — or put it behind a VPN/proxy).
-      - "8080:8080"
     volumes:
+      # Logs, host key, and per-session recordings persist here. Review activity
+      # under ./data/logs (sessions.jsonl, commands.csv, transcripts/, casts/).
+      # Optional: drop a config.yaml in ./data to tune geoip (else defaults apply).
       - ./data:/data
-      # Operator config (dashboard users, geoip toggle).
-      # IMPORTANT: copy config.yaml.example -> config.yaml *before* `docker
-      # compose up`. The long-form bind below tells Docker NOT to silently
-      # create a directory at the host path if the file is missing — it'll
-      # error out instead, which is what you want.
-      - type: bind
-        source: ./config.yaml
-        target: /app/config.yaml
-        read_only: true
-        bind:
-          create_host_path: false

@@ -1,17 +1,19 @@
-"""Entrypoint: starts the SSH honeypot and the dashboard side-by-side."""
+"""Entrypoint: starts the SSH honeypot and the public decoy website.
+
+All activity is written to log files (JSONL + per-command CSV + per-session
+transcripts/asciicasts under the log dir) for later review — there is no
+operator dashboard.
+"""
 from __future__ import annotations
 
 import os
-import sys
 import threading
 from pathlib import Path
 
 import paramiko
 
 from .config import load as load_config
-from .dashboard import run_dashboard
 from .decoy_web import serve_decoy_web
-from .event_bus import EventBus
 from .geoip import GeoIPLookup
 from .logger import SessionLogger
 from .session import handle_session as run_session
@@ -35,24 +37,9 @@ def main() -> None:
         )
 
     cfg = load_config()
-    if cfg.dashboard.auth_enabled and not cfg.dashboard.users:
-        print(
-            "[honeypot] WARNING: dashboard auth is enabled but no users are defined "
-            "in config.yaml — the dashboard will reject every login. Copy "
-            "config.yaml.example to config.yaml and add at least one user.",
-            file=sys.stderr,
-        )
-    elif not cfg.dashboard.auth_enabled:
-        print(
-            "[honeypot] WARNING: dashboard auth is DISABLED — bind it to localhost "
-            "or behind a reverse proxy.",
-            file=sys.stderr,
-        )
 
     ssh_host = os.environ.get("HONEYPOT_SSH_HOST", "0.0.0.0")
     ssh_port = int(os.environ.get("HONEYPOT_SSH_PORT", "22"))
-    ui_host = os.environ.get("HONEYPOT_UI_HOST", "0.0.0.0")
-    ui_port = int(os.environ.get("HONEYPOT_UI_PORT", "8080"))
     web_host = os.environ.get("HONEYPOT_WEB_HOST", "0.0.0.0")
     web_port = int(os.environ.get("HONEYPOT_WEB_PORT", "80"))
     web_enabled = os.environ.get("HONEYPOT_WEB_ENABLED", "1").lower() not in ("0", "false", "no")
@@ -62,26 +49,12 @@ def main() -> None:
     # Per-command CSV (for quick tabular analysis) lives beside the JSONL.
     csv_path = os.path.join(os.path.dirname(log_path) or ".", "commands.csv")
 
-    bus = EventBus()
-    logger = SessionLogger(log_path, bus=bus, csv_path=csv_path)
+    logger = SessionLogger(log_path, csv_path=csv_path)
     geoip = GeoIPLookup(cfg.geoip)
     host_key = _load_or_create_host_key(host_key_path)
 
     def _session_handler(channel, server, session_id):
         run_session(channel, server, session_id, logger)
-
-    def _ssh_thread():
-        serve_forever(
-            host=ssh_host,
-            port=ssh_port,
-            host_key=host_key,
-            handle_session=_session_handler,
-            logger=logger,
-            geoip=geoip,
-        )
-
-    t = threading.Thread(target=_ssh_thread, daemon=True, name="ssh-server")
-    t.start()
 
     # Public-facing decoy website (bait that funnels scanners toward SSH).
     # Shares the JSONL logger so web recon shows up alongside SSH events.
@@ -94,8 +67,15 @@ def main() -> None:
         )
         web_thread.start()
 
-    # Dashboard runs in the main thread (uvicorn manages its own loop).
-    run_dashboard(bus, cfg, host=ui_host, port=ui_port)
+    # SSH honeypot runs in the foreground (keeps the process alive).
+    serve_forever(
+        host=ssh_host,
+        port=ssh_port,
+        host_key=host_key,
+        handle_session=_session_handler,
+        logger=logger,
+        geoip=geoip,
+    )
 
 
 if __name__ == "__main__":

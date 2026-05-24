@@ -1,4 +1,4 @@
-"""JSONL session logger that also publishes to the dashboard event bus.
+"""JSONL session logger.
 
 The JSONL file is the structured source of truth. Optionally, command events are
 also appended to a flat CSV (`commands.csv`) for quick tabular analysis — one
@@ -15,15 +15,12 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from .event_bus import EventBus
-
 _CSV_COLUMNS = ["ts", "iso", "session_id", "tier", "score", "level", "command"]
 
 
 class SessionLogger:
-    def __init__(self, path: str, bus: EventBus | None = None, csv_path: str | None = None):
+    def __init__(self, path: str, csv_path: str | None = None):
         self.path = path
-        self.bus = bus
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self._lock = threading.Lock()
         self._fh = open(path, "a", buffering=1, encoding="utf-8")
@@ -55,8 +52,6 @@ class SessionLogger:
                     fields.get("command", ""),
                 ])
         print(line, file=sys.stdout, flush=True)
-        if self.bus is not None:
-            self.bus.publish(record)
 
     def close(self) -> None:
         for fh in (self._fh, self._csv_fh):

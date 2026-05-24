@@ -1,38 +1,17 @@
-## AI Honeypot config
+## AI Honeypot config (optional)
 ##
-## Copy this file to `config.yaml` and `chmod 600 config.yaml`.
-## Path can be overridden via HONEYPOT_CONFIG env var.
-
-dashboard:
-  # Used to sign session cookies. Generate with:
-  #   python -c "import secrets; print(secrets.token_urlsafe(48))"
-  # If left as null/empty, a random key is generated at startup (sessions
-  # don't survive restarts).
-  secret_key: null
-
-  # Cookie session lifetime in seconds (default 12h).
-  session_max_age: 43200
-
-  # Operator accounts that can log into the dashboard. Passwords are stored
-  # in plaintext here (mythic-c2 style) — restrict the file to mode 600.
-  # At least one user is required when auth is enabled.
-  users:
-    - username: admin
-      password: changeme
-    # - username: analyst
-    #   password: another-strong-passphrase
-
-  # Set to false to disable auth (NOT recommended unless the dashboard is
-  # bound to localhost / behind a reverse proxy that handles auth).
-  auth_enabled: true
+## Everything here has sane defaults, so this file is optional. To tune it, drop
+## a copy named `config.yaml` at ./data/config.yaml (the ./data volume is mounted
+## to /data), or set HONEYPOT_CONFIG to an explicit path.
 
 geoip:
-  # Geolocate source IPs of inbound SSH connections via ip-api.com.
-  # Disable if the honeypot has no outbound internet, or you'd rather keep
-  # the attacker's IP from being looked up via a third-party service.
+  # Geolocate source IPs of inbound SSH connections via ip-api.com and attach
+  # the result to connect/disconnect events in the JSONL log. Disable if the
+  # honeypot has no outbound internet, or you'd rather not look the IP up via a
+  # third-party service.
   enabled: true
   # Per-lookup timeout (seconds).
   timeout: 2.5
   # Optional explicit endpoint. The default free tier of ip-api.com is
-  # rate-limited to ~45 req/min — fine for a honeypot but cache is in-memory.
+  # rate-limited to ~45 req/min — fine for a honeypot; results are cached in memory.
   endpoint: "http://ip-api.com/json/{ip}?fields=status,country,countryCode,region,regionName,city,lat,lon,isp,org,as,query"
