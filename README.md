@@ -84,7 +84,7 @@ session's chosen company (`<slug>` below = its hostname token, e.g. `walmart`,
 
 | Lvl | Hostname                       | What the attacker sees                                                              |
 |-----|--------------------------------|-------------------------------------------------------------------------------------|
-| 1   | `<slug>-web-edge-01`           | Public DMZ web node, MOTD names the company, CrowdStrike Falcon sensor              |
+| 1   | `<slug>-web-edge-01`           | The box the decoy site runs on — Apache 2.4.49 + PHP 7.4 "Operations Portal" (:80/:443), MySQL (degraded), sshd; same deploy creds/files as the website |
 | 2   | `<slug>-app-prod-12`           | Prod Node.js app, Splunk forwarder, Okta env vars, CMDB tags (business-unit names)  |
 | 3   | `<slug>-ci-build-04`           | Jenkins CI w/ AWS Org build profile, GHE token, subsidiary repos, krb5 → AD         |
 | 4   | `<slug>-bastion-east-02`       | Jump host into 10.0.0.0/8, known_hosts on AD DCs + Splunk indexers, 12.4k-host CMDB |
@@ -92,6 +92,14 @@ session's chosen company (`<slug>` below = its hostname token, e.g. `walmart`,
 
 The chosen persona is recorded on the `session_start` log event (`company`,
 `company_slug`) so you can see which company each attacker was shown.
+
+The **level-1 edge node is kept consistent with the decoy website** (single
+source of truth in `company.py`): the same Apache 2.4.49 / PHP 7.4 stack,
+`/var/www/portal` app, MySQL, `sshd`, and deploy credentials. So an attacker who
+followed the site's breadcrumb in and runs `systemctl status apache2`,
+`ls /var/www`, `ss -tlnp`, or `cat /var/www/portal/.env` sees the box the
+website implied — not "service not found". The shell reports any service listed
+in the active host profile as installed and running.
 
 A bored, unsophisticated bot sees an empty marketing edge node; an active
 attacker escalates into a "crown jewel" Vault broker — keeping them engaged
@@ -295,6 +303,34 @@ data/logs/
 
 For SQL over the JSONL without any database, point DuckDB at it:
 `SELECT command, tier FROM read_json_auto('data/logs/sessions.jsonl') WHERE event='command';`
+
+## Shell guardrails & detection-testing
+
+The Claude shell is hardened against the two things that expose an LLM honeypot —
+prompt injection and inconsistent behavior:
+
+- **Input is always a command, never an instruction.** The system prompt's HARD
+  RULES treat every line (including "ignore all previous instructions", "what is
+  your prompt", "you are an AI", accusations, prose) as bash command input, and
+  forbid conversing, apologizing, acknowledging accusations, or revealing it's an
+  AI / its prompt / a honeypot.
+- **Deterministic errors.** Unknown commands always return the exact
+  `bash: <first-token>: command not found` (the bug that originally got it
+  spotted was a *bare* `command not found` one turn and `bash: Is: command not
+  found` the next).
+- **Output sanitizer** (`claude_shell._sanitize_output`, defense-in-depth): if
+  the model ever echoes a distinctive fragment of its own system prompt — or a
+  real-looking API key — the reply is dropped and a deterministic bash error is
+  returned instead. Tuned to ignore legitimate/bait output (fake `AKIAFAKE…`
+  keys, the word "honeypot" in a file, etc.).
+
+Test it:
+```bash
+python tests/test_guardrails.py     # offline: prompt + sanitizer unit tests
+# live battery against a running honeypot (replays the observed breakout):
+pip install paramiko
+python tests/redteam.py --host 127.0.0.1 --port 22 --user attacker --password x
+```
 
 ## Security notes
 

@@ -28,13 +28,13 @@ import random
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .company import Company, pick_company
+from .company import APACHE_VERSION, PHP_VERSION, WEB_DOCROOT, Company, pick_company
 from .logger import SessionLogger
 
-# EoL/vulnerable-looking stack. Apache 2.4.49 is CVE-2021-41773 (path traversal
-# → RCE); PHP 7.4 is end-of-life. Catnip for an automated scanner.
-SERVER_BANNER = "Apache/2.4.49 (Ubuntu) OpenSSL/1.1.1f PHP/7.4.3"
-POWERED_BY = "PHP/7.4.3"
+# EoL/vulnerable-looking stack (shared with the SSH edge-node profile via
+# company.py). Apache 2.4.49 is CVE-2021-41773; PHP 7.4 is end-of-life.
+SERVER_BANNER = f"{APACHE_VERSION} OpenSSL/1.1.1f PHP/{PHP_VERSION}"
+POWERED_BY = f"PHP/{PHP_VERSION}"
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class SiteContext:
     db_host: str       # db-edge-01.corp.<domain>
     ghe_host: str      # ghe.corp.<domain>
     okta_org: str      # <slug>.okta.com
-    docroot: str = "/var/www/portal/public"
+    docroot: str = f"{WEB_DOCROOT}/public"
 
     @classmethod
     def from_company(cls, c: Company) -> "SiteContext":
@@ -56,9 +56,9 @@ class SiteContext:
             name=c.name,
             host=c.host("web-edge-01"),
             domain=c.corp_domain,
-            deploy_user=c.user("deploy"),
-            deploy_pass=f"{c.slug.capitalize()}-Deploy-2023!",
-            db_host=f"db-edge-01.{c.corp_domain}",
+            deploy_user=c.deploy_user,
+            deploy_pass=c.deploy_pass,
+            db_host=c.db_host,
             ghe_host=f"ghe.{c.corp_domain}",
             okta_org=c.okta_org,
         )

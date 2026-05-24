@@ -39,6 +39,24 @@ import os
 import random
 from dataclasses import dataclass, field
 
+# --- Shared "public web edge node" stack ---------------------------------
+# Single source of truth for the software the decoy website (decoy_web.py)
+# advertises AND the level-1 edge-node profile the SSH/Claude shell projects, so
+# an attacker who reads the site and then SSHes in finds the SAME services and
+# files (e.g. `systemctl status apache2` returns a running unit, /var/www/portal
+# exists, the same deploy creds appear). EoL on purpose: Apache 2.4.49 is
+# CVE-2021-41773; PHP 7.4 is end-of-life.
+APACHE_VERSION = "Apache/2.4.49 (Ubuntu)"
+PHP_VERSION = "7.4.3"
+MYSQL_VERSION = "5.7.38"
+OPENSSH_VERSION = "OpenSSH_8.9p1"
+WEB_DOCROOT = "/var/www/portal"          # public/ is the served root
+DB_NAME = "portal"
+DB_USER = "portal"
+DB_PASS = "p0rtal-Db-Pw!"
+MIGRATION_TICKET = "OPS-4471"
+SUDO_RUNBOOK = "/usr/local/bin/runbook"
+
 
 @dataclass(frozen=True)
 class Company:
@@ -71,6 +89,39 @@ class Company:
 
     def user(self, role: str) -> str:
         return f"{self.slug}-{role}"
+
+    # --- web edge node (shared by the decoy site + the L1 SSH profile) ---
+    @property
+    def deploy_user(self) -> str:
+        return self.user("deploy")
+
+    @property
+    def deploy_pass(self) -> str:
+        # Plausible-but-fake temp password leaked by the decoy site.
+        return f"{self.slug.capitalize()}-Deploy-2023!"
+
+    @property
+    def db_host(self) -> str:
+        return f"db-edge-01.{self.corp_domain}"
+
+    def edge_stack(self) -> dict[str, str]:
+        """Facts describing the public web edge node (`<slug>-web-edge-01`).
+
+        Shared between the decoy website and the level-1 SSH profile so both
+        tell the same story.
+        """
+        return {
+            "host": self.host("web-edge-01"),
+            "web": f"{APACHE_VERSION} / PHP {PHP_VERSION}",
+            "docroot": WEB_DOCROOT,
+            "db": f"MySQL {MYSQL_VERSION} on 127.0.0.1:3306 (degraded)",
+            "db_host": self.db_host,
+            "ssh": f"{OPENSSH_VERSION} on :22 (password auth enabled)",
+            "deploy_user": self.deploy_user,
+            "deploy_pass": self.deploy_pass,
+            "ticket": MIGRATION_TICKET,
+            "runbook": SUDO_RUNBOOK,
+        }
 
 
 # Curated Fortune-100 set with reasonably accurate, public metadata and a few
